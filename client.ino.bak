@@ -1,7 +1,5 @@
-#define DEBUG_WEBSOCKETS
-
 #include <driver/i2s.h>
-#include <M5Cardputer.h>
+#include <M5Atom.h>
 #include <Arduino.h>  //not needed in the arduino ide
 #include <AsyncTCP.h> //https://github.com/me-no-dev/AsyncTCP using the latest dev version from @me-no-dev
 #include <DNSServer.h>
@@ -13,19 +11,18 @@
 #include <WiFiMulti.h>
 #include <WiFiClientSecure.h>
 #include <WebSocketsClient.h>
+#include <Preferences.h>
+
+Preferences preferences;
 
 String server_domain = "";
 int server_port = 10001;
-
-int lineHeightDefault = 12;
-int lineHeight = lineHeightDefault;
-int yPos = 0; // Keeps track of the current vertical position for text display
 
 // ----------------------- START OF WIFI CAPTIVE PORTAL -------------------
 
 // Pre reading on the fundamentals of captive portals https://textslashplain.com/2022/06/24/captive-portals/
 
-const char *ssid = "c0mputer"; // FYI The SSID can't have a space in it.
+const char *ssid = "01-Light"; // FYI The SSID can't have a space in it.
 // const char * password = "12345678"; //Atleast 8 chars
 const char *password = NULL; // no password
 
@@ -42,6 +39,7 @@ const String localIPURL = "http://4.3.2.1";   // a string version of the local I
 const int kNetworkTimeout = 30 * 1000;
 // Number of milliseconds to wait if no data is available before trying again
 const int kNetworkDelay = 1000;
+
 
 String generateHTMLWithSSIDs()
 {
@@ -78,7 +76,7 @@ const char post_connected_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
 <head>
-  <title>c0mputer Setup</title>
+  <title>01OS Setup</title>
   <style>
   
   * {
@@ -159,7 +157,7 @@ String successHtml = R"=====(
 <!DOCTYPE html>
 <html>
 <head>
-  <title>c0mputer Setup</title>
+  <title>01OS Setup</title>
   <style>
     body {
       background-color: #fff;
@@ -189,53 +187,6 @@ String successHtml = R"=====(
 
 DNSServer dnsServer;
 AsyncWebServer server(80);
-
-void dualOutput(bool addNewLine, const char *format, ...) {
-    char buf[256]; // Buffer to hold the formatted string
-    va_list args;
-
-    va_start(args, format);
-    vsnprintf(buf, sizeof(buf), format, args); // Format the string using the arguments
-    va_end(args);
-
-    Serial.print(buf); // Print to Serial
-
-    // Before printing to the display, check and handle vertical scrolling
-    if (yPos + lineHeight > M5Cardputer.Display.height()) {
-        M5Cardputer.Display.scroll(0, -lineHeight); // Scroll the display content up by one line height
-        yPos -= lineHeight; // Adjust yPos accordingly to "free up" space at the bottom
-    }
-
-    // Print to the M5Cardputer display at the current yPos
-    M5Cardputer.Display.setCursor(0, yPos);
-    M5Cardputer.Display.print(buf);
-
-    // If required, add a new line
-    if (addNewLine) {
-        Serial.println();
-        M5Cardputer.Display.println(); // This adds a new line on the display too
-        yPos += lineHeight; // Move yPos to the next start line position
-    } else {
-        // If we're not adding a new line, simply account for the text just printed
-        yPos += lineHeight; // Adjust this if a single line might not match your lineHeight
-    }
-
-    // Optional: if you want to clear the area where the new text will go, uncomment below
-    M5Cardputer.Display.fillRect(0, yPos, M5Cardputer.Display.width(), lineHeight, BLACK);
-
-    // Note: Depending on how new lines are handled internally by your display library,
-    // you might need to adjust yPos differently when addNewLine is true.
-}
-
-// Overloaded version for Arduino String objects
-void dualOutput(bool addNewLine, const String &message) {
-  dualOutput(addNewLine, "%s", message.c_str()); // Forward to the original as a formatted string
-}
-
-void dualNewLine() {
-  Serial.println();
-  M5.Lcd.println();
-}
 
 void setUpDNSServer(DNSServer &dnsServer, const IPAddress &localIP)
 {
@@ -268,30 +219,26 @@ void startSoftAccessPoint(const char *ssid, const char *password, const IPAddres
     vTaskDelay(100 / portTICK_PERIOD_MS); // Add a small delay
 }
 
-void connectToWifi(String ssid, String password)
-{
-    dualOutput(true, "Init Wi-Fi...");
-    // WiFi.begin(ssid.c_str(), password.c_str());
-    WiFi.begin(ssid, password);
-    Serial.println("Done");
-    dualOutput(true, "Done");
+void connectToWifi(String ssid, String password) {
+    WiFi.begin(ssid.c_str(), password.c_str());
 
-    // Wait for connection to establish
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20)
-    {
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         delay(1000);
-        dualOutput(false, ".");
+        Serial.print(".");
         attempts++;
     }
 
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        dualOutput(true, "Connected to Wi-Fi");
-    }
-    else
-    {
-        dualOutput(true, "Failed to connect to Wi-Fi. Check credentials.");
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected to Wi-Fi");
+
+        // Store credentials on successful connection
+        preferences.begin("wifi", false); // Open Preferences with my-app namespace. RW-mode is false by default.
+        preferences.putString("ssid", ssid); // Put your SSID.
+        preferences.putString("password", password); // Put your PASSWORD.
+        preferences.end(); // Close the Preferences.
+    } else {
+        Serial.println("Failed to connect to Wi-Fi. Check credentials.");
     }
 }
 
@@ -335,7 +282,7 @@ bool connectTo01OS(String server_address)
     }
 
     HttpClient http(c, domain.c_str(), port); 
-    dualOutput(true, "Connecting to 01OS at " + domain + ":" + port + "/ping");
+    Serial.println("Connecting to 01OS at " + domain + ":" + port + "/ping");
 
     if (domain.indexOf("ngrok") != -1) {
         http.sendHeader("ngrok-skip-browser-warning", "80");
@@ -346,29 +293,32 @@ bool connectTo01OS(String server_address)
 
     if (err == 0)
     {
-        dualOutput(true, "Started the ping request");
+        Serial.println("Started the ping request");
 
         err = http.responseStatusCode();
         if (err >= 0)
         {
-            dualOutput(false, "Got status code: ");
-            dualOutput(true, "%d", err);
+            Serial.print("Got status code: ");
+            Serial.println(err);
 
             if (err == 200)
             {
                 server_domain = domain;
                 server_port = port;
                 connectionSuccess = true;
+                preferences.begin("network", false); // Use a different namespace for network settings
+                preferences.putString("server_url", server_address); // Store the server URL
+                preferences.end(); // Close the Preferences
             }
 
             err = http.skipResponseHeaders();
             if (err >= 0)
             {
                 int bodyLen = http.contentLength();
-                dualOutput(false, "Content length is: ");
-                dualOutput(true, "%d", bodyLen);
-                dualNewLine();
-                dualOutput(true, "Body:");
+                Serial.print("Content length is: ");
+                Serial.println(bodyLen);
+                Serial.println();
+                Serial.println("Body:");
 
                 // Now we've got to the body, so we can print it out
                 unsigned long timeoutStart = millis();
@@ -383,8 +333,6 @@ bool connectTo01OS(String server_address)
                         // Print out this character
                         Serial.print(c);
                         Serial.print("");
-                        M5Cardputer.Display.print(c);
-                        M5Cardputer.Display.print("");
 
                         bodyLen--;
                         // We read something, reset the timeout counter
@@ -400,21 +348,22 @@ bool connectTo01OS(String server_address)
             }
             else
             {
-                dualOutput(false, "Failed to skip response headers: ");
-                dualOutput(true, "%d", err);
+                Serial.print("Failed to skip response headers: ");
+                Serial.println(err);
             }
         }
         else
         {
-            dualOutput(false, "Getting response failed: ");
-            dualOutput(true, "%d", err);
+            Serial.print("Getting response failed: ");
+            Serial.println(err);
         }
     }
     else
     {
-        dualOutput(false, "Connection failed: ");
-        dualOutput(true, "%d", err);
+        Serial.print("Connection failed: ");
+        Serial.println(err);
     }
+    
   return connectionSuccess;
 }
 
@@ -464,24 +413,24 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP)
     Serial.printf("Wifi scan complete: %d . WIFI_SCAN_RUNNING: %d", WiFi.scanComplete(), WIFI_SCAN_RUNNING);
     if(WiFi.scanComplete() > 0) {
       // Scan complete, process results
-      dualOutput(true, "Done scanning wifi");
+      Serial.println("Done scanning wifi");
       htmlContent = generateHTMLWithSSIDs();
       // WiFi.scanNetworks(true); // Start a new scan in async mode
     }
 		AsyncWebServerResponse *response = request->beginResponse(200, "text/html", htmlContent);
 		response->addHeader("Cache-Control", "public,max-age=31536000");  // save this file to cache for 1 year (unless you refresh)
 		request->send(response);
-		dualOutput(true, "Served HTML Page"); });
+		Serial.println("Served HTML Page"); });
 
     // the catch all
     server.onNotFound([](AsyncWebServerRequest *request)
                       {
 		request->redirect(localIPURL);
-		dualOutput(false, "onnotfound ");
-		dualOutput(false, request->host());	// This gives some insight into whatever was being requested on the serial monitor
-		dualOutput(false, " ");
-		dualOutput(false, request->url());
-		dualOutput(false, " sent redirect to " + localIPURL + "\n"); });
+		Serial.print("onnotfound ");
+		Serial.print(request->host());	// This gives some insight into whatever was being requested on the serial monitor
+		Serial.print(" ");
+		Serial.print(request->url());
+		Serial.print(" sent redirect to " + localIPURL + "\n"); });
 
     server.on("/submit", HTTP_POST, [](AsyncWebServerRequest *request)
               {
@@ -494,7 +443,7 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP)
         // If "OTHER" is selected, use the value from "otherSSID"
         if(ssid == "OTHER" && request->hasParam("otherSSID", true)) {
             ssid = request->getParam("otherSSID", true)->value();
-            dualOutput(true, "OTHER SSID SELECTED: " + ssid);
+            Serial.println("OTHER SSID SELECTED: " + ssid);
         }
     }
     
@@ -506,7 +455,10 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP)
     // Serial.println(password);
 
     // Attempt to connect to the Wi-Fi network with these credentials
-    connectToWifi(ssid, password);
+    if(request->hasParam("password", true) && request->hasParam("ssid", true)) {
+      connectToWifi(ssid, password);
+    }
+    
 
     // Redirect user or send a response back
     if (WiFi.status() == WL_CONNECTED) {
@@ -514,7 +466,7 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP)
       AsyncWebServerResponse *response = request->beginResponse(200, "text/html", htmlContent);
       response->addHeader("Cache-Control", "public,max-age=31536000");  // save this file to cache for 1 year (unless you refresh)
       request->send(response);
-      dualOutput(true, "Served Post connection HTML Page"); 
+      Serial.println("Served Post connection HTML Page"); 
     } else {
       request->send(200, "text/plain", "Failed to connect to " + ssid);
     } });
@@ -539,10 +491,10 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP)
         AsyncWebServerResponse *response = request->beginResponse(200, "text/html", successHtml);
         response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");  // Prevent caching of this page
         request->send(response);     
-        dualOutput(true, " ");
-        dualOutput(true, "Connected to 01 websocket!");
-        dualOutput(true, " ");
-        dualOutput(true, "Served success HTML Page");
+        Serial.println(" ");
+        Serial.println("Connected to 01 websocket!");
+        Serial.println(" ");
+        Serial.println("Served success HTML Page");
     }
     else
     {
@@ -554,11 +506,58 @@ void setUpWebserver(AsyncWebServer &server, const IPAddress &localIP)
         AsyncWebServerResponse *response = request->beginResponse(200, "text/html", htmlContent);
         response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");  // Prevent caching of this page
         request->send(response);
-        dualOutput(true, "Served Post connection HTML Page with error message");
+        Serial.println("Served Post connection HTML Page with error message");
     }
     });
 }
+void tryReconnectWiFi() {
+    Serial.println("Checking for stored WiFi credentials...");
+    preferences.begin("wifi", true); // Open Preferences with my-app namespace in ReadOnly mode
+    String ssid = preferences.getString("ssid", ""); // Get stored SSID, if any
+    String password = preferences.getString("password", ""); // Get stored password, if any
+    preferences.end(); // Close the Preferences
 
+    if (ssid != "") { // Check if we have stored credentials
+        Serial.println("Trying to connect to WiFi with stored credentials.");
+        WiFi.begin(ssid.c_str(), password.c_str());
+
+        int attempts = 0;
+        while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+            delay(500);
+            Serial.print(".");
+            attempts++;
+        }
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("Connected to Wi-Fi using stored credentials.");
+            tryReconnectToServer();
+            return;
+        } else {
+            Serial.println("Failed to connect to Wi-Fi. Starting captive portal.");
+        }
+    } else {
+        Serial.println("No stored WiFi credentials. Starting captive portal.");
+    }
+}
+void tryReconnectToServer() {
+    preferences.begin("network", true); // Open Preferences with the "network" namespace in ReadOnly mode
+    String serverURL = preferences.getString("server_url", ""); // Get stored server URL, if any
+    preferences.end(); // Close the Preferences
+
+    if (!serverURL.isEmpty()) {
+        Serial.println("Trying to reconnect to server with stored URL: " + serverURL);
+        // Attempt to connect to the server using the stored URL
+        if (connectTo01OS(serverURL)) {
+            Serial.println("Reconnected to server using stored URL.");
+        } else {
+            Serial.println("Failed to reconnect to server. Proceeding with normal startup.");
+            // Proceed with your normal startup routine, possibly involving user input to get a new URL
+        }
+    } else {
+        Serial.println("No stored server URL. Proceeding with normal startup.");
+        // Normal startup routine
+    }
+}
 // ----------------------- END OF WIFI CAPTIVE PORTAL -------------------
 
 // ----------------------- START OF PLAYBACK -------------------
@@ -588,8 +587,7 @@ public:
     void loop()
     {
         lastTickState = thisTickState;
-        thisTickState = M5.BtnA.isPressed() != 0;
-        // thisTickState = M5.Btn.isPressed() != 0;
+        thisTickState = M5.Btn.isPressed() != 0;
     }
 
     bool justPressed()
@@ -611,7 +609,7 @@ ButtonChecker button = ButtonChecker();
 
 void InitI2SSpeakerOrMic(int mode)
 {
-    dualOutput(false, "InitI2sSpeakerOrMic %d\n", mode);
+    Serial.printf("InitI2sSpeakerOrMic %d\n", mode);
     esp_err_t err = ESP_OK;
 
     i2s_driver_uninstall(SPEAKER_I2S_NUMBER);
@@ -660,7 +658,7 @@ void InitI2SSpeakerOrMic(int mode)
 
 void speaker_play(uint8_t *payload, uint32_t len)
 {
-    dualOutput(false, "received %lu bytes", len);
+    Serial.printf("received %lu bytes", len);
     size_t bytes_written;
     InitI2SSpeakerOrMic(MODE_SPK);
     i2s_write(SPEAKER_I2S_NUMBER, payload, len,
@@ -669,73 +667,74 @@ void speaker_play(uint8_t *payload, uint32_t len)
 
 void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 {
-  switch (type)
-  {
-  case WStype_DISCONNECTED:
-    dualOutput(false, "[WSc] Disconnected!\n");
-    dualOutput(true, "[Debug] WebSocket disconnected");
-    break;
-  case WStype_CONNECTED:
-    dualOutput(false, "[WSc] Connected to url: %s\n", payload);
-    dualOutput(true, "[Debug] WebSocket connected to URL: %s\n", payload);
-    break;
-  case WStype_TEXT:
-  {
-    dualOutput(false, "[WSc] get text: %s\n", payload);
-    dualOutput(true, "[Debug] Received text: %s\n", payload);
-    std::string str(payload, payload + length);
-    bool isAudio = str.find("\"audio\"") != std::string::npos;
-    if (isAudio && str.find("\"start\"") != std::string::npos)
+    switch (type)
     {
-      dualOutput(true, "start playback");
-      dualOutput(true, "[Debug] Starting audio playback");
-      speaker_offset = 0;
-      InitI2SSpeakerOrMic(MODE_SPK);
+    case WStype_DISCONNECTED:
+        Serial.printf("[WSc] Disconnected!\n");
+        break;
+    case WStype_CONNECTED:
+        Serial.printf("[WSc] Connected to url: %s\n", payload);
+
+        // send message to server when Connected
+        break;
+    case WStype_TEXT:
+        Serial.printf("[WSc] get text: %s\n", payload);
+        {
+            std::string str(payload, payload + length);
+            bool isAudio = str.find("\"audio\"") != std::string::npos;
+            if (isAudio && str.find("\"start\"") != std::string::npos)
+            {
+                Serial.println("start playback");
+                speaker_offset = 0;
+                InitI2SSpeakerOrMic(MODE_SPK);
+            }
+            else if (isAudio && str.find("\"end\"") != std::string::npos)
+            {
+                Serial.println("end playback");
+                // speaker_play(speakerdata0, speaker_offset);
+                // speaker_offset = 0;
+            }
+        }
+        // send message to server
+        // webSocket.sendTXT("message here");
+        break;
+    case WStype_BIN:
+        Serial.printf("[WSc] get binary length: %u\n", length);
+        memcpy(speakerdata0 + speaker_offset, payload, length);
+        speaker_offset += length;
+        size_t bytes_written;
+        i2s_write(SPEAKER_I2S_NUMBER, speakerdata0, speaker_offset, &bytes_written, portMAX_DELAY);
+        speaker_offset = 0;
+
+        // send data to server
+        // webSocket.sendBIN(payload, length);
+        break;
+    case WStype_ERROR:
+    case WStype_FRAGMENT_TEXT_START:
+    case WStype_FRAGMENT_BIN_START:
+    case WStype_FRAGMENT:
+    case WStype_FRAGMENT_FIN:
+        break;
     }
-    else if (isAudio && str.find("\"end\"") != std::string::npos)
-    {
-      dualOutput(true, "end playback");
-      dualOutput(true, "[Debug] Ending audio playback");
-    }
-    break;
-  }
-  case WStype_BIN:
-    dualOutput(false, "[WSc] get binary length: %u\n", length);
-    dualOutput(true, "[Debug] Received binary data of length: %u\n", length);
-    memcpy(speakerdata0 + speaker_offset, payload, length);
-    speaker_offset += length;
-    size_t bytes_written;
-    i2s_write(SPEAKER_I2S_NUMBER, speakerdata0, speaker_offset, &bytes_written, portMAX_DELAY);
-    speaker_offset = 0;
-    break;
-  case WStype_ERROR:
-  case WStype_FRAGMENT_TEXT_START:
-  case WStype_FRAGMENT_BIN_START:
-  case WStype_FRAGMENT:
-  case WStype_FRAGMENT_FIN:
-    dualOutput(true, "[Debug] Received unhandled WebSocket event type");
-    break;
-  }
 }
 
 void websocket_setup(String server_domain, int port)
 {
     if (WiFi.status() != WL_CONNECTED)
     {
-        dualOutput(true, "Not connected to WiFi. Abandoning setup websocket");
+        Serial.println("Not connected to WiFi. Abandoning setup websocket");
         return;
     }
-    dualOutput(true, "connected to WiFi");
-    webSocket.begin(server_domain, 80, "/");
+    Serial.println("connected to WiFi");
+    webSocket.begin(server_domain, port, "/");
     webSocket.onEvent(webSocketEvent);
     // webSocket.setAuthorization("user", "Password");
     webSocket.setReconnectInterval(5000);
-    dualOutput(true, "Websocket setup fininshed");
 }
 
 void flush_microphone()
 {
-    dualOutput(false, "[microphone] flushing and sending %d bytes of data\n", data_offset);
+    Serial.printf("[microphone] flushing and sending %d bytes of data\n", data_offset);
     if (data_offset == 0)
         return;
     webSocket.sendBIN(microphonedata0, data_offset);
@@ -745,14 +744,14 @@ void flush_microphone()
 void audio_recording_task(void *arg) {
     while (1) {
         if (recording) {
-            dualOutput(false, "Reading chunk at %d...\n", data_offset);
+            Serial.printf("Reading chunk at %d...\n", data_offset);
             size_t bytes_read;
             i2s_read(
                 SPEAKER_I2S_NUMBER,
                 (char *)(microphonedata0 + data_offset),
                 DATA_SIZE, &bytes_read, (100 / portTICK_RATE_MS));
             data_offset += bytes_read;
-            dualOutput(false, "Read %d bytes in chunk.\n", bytes_read);
+            Serial.printf("Read %d bytes in chunk.\n", bytes_read);
 
             // Only send here
             if (data_offset > MAX_DATA_LEN)
@@ -770,67 +769,51 @@ void audio_recording_task(void *arg) {
 // ----------------------- END OF PLAYBACK -------------------
 
 bool hasSetupWebsocket = false;
+bool isServerURLStored() {
+    preferences.begin("network", true); // Open Preferences with the "network" namespace in ReadOnly mode
+    String serverURL = preferences.getString("server_url", ""); // Get stored server URL, if any
+    preferences.end(); // Close the Preferences
+    return !serverURL.isEmpty();
+}
+void setup() {
+    Serial.begin(115200); // Initialize serial communication at 115200 baud rate.
+     // Attempt to reconnect to WiFi using stored credentials.
+    // Check if WiFi is connected but the server URL isn't stored
+    
+    Serial.setTxBufferSize(1024); // Set the transmit buffer size for the Serial object.
 
-// M5Cardputer setup
-M5Canvas canvas(&M5Cardputer.Display);
-String commandBuffer              = "> ";
-int cursorY                       = 0;
-// const int lineHeight              = 22;
-unsigned long lastKeyPressMillis  = 0;
-const unsigned long debounceDelay = 200;  // Adjust debounce delay as needed
-
-void setup()
-{
-    // Set the transmit buffer size for the Serial object and start it with a baud rate of 115200.
-    Serial.setTxBufferSize(1024);
-    Serial.begin(115200);
-
-    auto cfg = M5.config();
-    M5Cardputer.begin(cfg, true);
-    M5Cardputer.Display.setRotation(1);
-    int textsize = M5Cardputer.Display.height() / 80;
-    lineHeight = textsize * lineHeightDefault;
-    if (textsize == 0) {
-        textsize = 1;
-        lineHeight = lineHeightDefault;
-    }
-    dualOutput(true, "textsize = %d", textsize);
-    dualOutput(true, "lineHeight = %d", lineHeight);
-    M5Cardputer.Display.setTextSize(textsize);  // Set text size
-    M5Cardputer.Display.setTextColor(WHITE);
-    M5Cardputer.Display.fillScreen(BLACK);
-
-    // Wait for the Serial object to become available.
-    while (!Serial)
-        ;
-
-    WiFi.mode(WIFI_AP_STA);
-
-    // Print a welcome message to the Serial port.
-    dualOutput(true, "\n\nCaptive Test, V0.5.0 compiled " __DATE__ " " __TIME__ " by CD_FER"); //__DATE__ is provided by the platformio ide
-    dualOutput(false, "%s-%d\n\r", ESP.getChipModel(), ESP.getChipRevision());
-
-    dualOutput(true, "starting accesspoint");
+    WiFi.mode(WIFI_AP_STA); // Set WiFi mode to both AP and STA.
+    
+    // delay(100); // Short delay to ensure mode change takes effect
+    // WiFi.softAPConfig(localIP, gatewayIP, subnetMask);
+    // WiFi.softAP(ssid, password);
     startSoftAccessPoint(ssid, password, localIP, gatewayIP);
-
-    dualOutput(true, "setting up DNS server...");
     setUpDNSServer(dnsServer, localIP);
-
-    dualOutput(true, "scanNetworks setting true...");
-    WiFi.scanNetworks(true);
-
-    dualOutput(true, "setting up web server...");
+        
     setUpWebserver(server, localIP);
-    dualOutput(true, "starting web server...");
-    server.begin();
+    tryReconnectWiFi();
+    // Print a welcome message to the Serial port.
+    Serial.println("\n\nCaptive Test, V0.5.0 compiled " __DATE__ " " __TIME__ " by CD_FER");
+    Serial.printf("%s-%d\n\r", ESP.getChipModel(), ESP.getChipRevision());
 
-    dualNewLine();
-    dualOutput(false, "Startup Time:"); // should be somewhere between 270-350 for Generic ESP32 (D0WDQ6 chip, can have a higher startup time on first boot)
-    dualOutput(true, "%lu ms", millis());
-    dualNewLine();
+    // If WiFi reconnect fails, start the soft access point for the captive portal.
+    if (WiFi.status() != WL_CONNECTED) {
+        startSoftAccessPoint(ssid, password, localIP, gatewayIP);
+        setUpDNSServer(dnsServer, localIP);
+        WiFi.scanNetworks(true); // Start scanning for networks in preparation for the captive portal.
+        setUpWebserver(server, localIP); // Set up the web server for the captive portal.
+    }
 
-    /* Create task for I2S */
-    xTaskCreate(audio_recording_task, "AUDIO", 4096, NULL, 4, NULL);
+    server.begin(); // Begin the web server.
+
+    Serial.print("\nStartup Time:");
+    Serial.println(millis());
+    Serial.print("\n");
+
+    M5.begin(true, false, true); // Initialize M5Stack Atom board.
+    M5.dis.drawpix(0, CRGB(255, 0, 50)); // Set the display color.
+
+    xTaskCreate(audio_recording_task, "AUDIO", 4096, NULL, 4, NULL); // Create a task for audio recording.
 }
 
 void loop()
@@ -847,15 +830,14 @@ void loop()
     {
         if (server_domain != "")
         {
-            dualOutput(true, "Setting up websocket to 01OS " + server_domain + ":" + server_port);
+            Serial.println("Setting up websocket to 01OS " + server_domain + ":" + server_port);
             websocket_setup(server_domain, server_port);
-            dualOutput(true, "setting MODE_SPK...");
             InitI2SSpeakerOrMic(MODE_SPK);
 
             hasSetupWebsocket = true;
-            // M5.dis.drawpix(0, CRGB(0, 128, 150));
+            M5.dis.drawpix(0, CRGB(0, 128, 150));
 
-            dualOutput(true, "Websocket connection flow completed");
+            Serial.println("Websocket connection flow completed");
         }
     }
 
@@ -864,16 +846,16 @@ void loop()
         button.loop();
         if (button.justPressed())
         {
-            dualOutput(true, "Recording...");
+            Serial.println("Recording...");
             webSocket.sendTXT("{\"role\": \"user\", \"type\": \"audio\", \"format\": \"bytes.raw\", \"start\": true}");
             InitI2SSpeakerOrMic(MODE_MIC);
             recording = true;
             data_offset = 0;
-            dualOutput(true, "Recording ready.");
+            Serial.println("Recording ready.");
         }
         else if (button.justReleased())
         {
-            dualOutput(true, "Stopped recording.");
+            Serial.println("Stopped recording.");
             webSocket.sendTXT("{\"role\": \"user\", \"type\": \"audio\", \"format\": \"bytes.raw\", \"end\": true}");
             flush_microphone();
             recording = false;
