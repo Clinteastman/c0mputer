@@ -78,7 +78,7 @@ const char post_connected_html[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html>
 <head>
-  <title>01OS Setup</title>
+  <title>c0mputer Setup</title>
   <style>
   
   * {
@@ -159,7 +159,7 @@ String successHtml = R"=====(
 <!DOCTYPE html>
 <html>
 <head>
-  <title>01OS Setup</title>
+  <title>c0mputer Setup</title>
   <style>
     body {
       background-color: #fff;
