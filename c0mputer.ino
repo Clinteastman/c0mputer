@@ -1,3 +1,5 @@
+#define DEBUG_WEBSOCKETS
+
 #include <driver/i2s.h>
 #include <M5Cardputer.h>
 #include <Arduino.h>  //not needed in the arduino ide
@@ -786,14 +788,14 @@ void setup()
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
     M5Cardputer.Display.setRotation(1);
-    int textsize = M5Cardputer.Display.height() / 60;
+    int textsize = M5Cardputer.Display.height() / 80;
     lineHeight = textsize * lineHeightDefault;
     if (textsize == 0) {
         textsize = 1;
         lineHeight = lineHeightDefault;
     }
-    dualOutput(true, "textsize = $d", textsize);
-    dualOutput(true, "lineHeight = $d", lineHeight);
+    dualOutput(true, "textsize = %d", textsize);
+    dualOutput(true, "lineHeight = %d", lineHeight);
     M5Cardputer.Display.setTextSize(textsize);  // Set text size
     M5Cardputer.Display.setTextColor(WHITE);
     M5Cardputer.Display.fillScreen(BLACK);
@@ -808,17 +810,18 @@ void setup()
     dualOutput(true, "\n\nCaptive Test, V0.5.0 compiled " __DATE__ " " __TIME__ " by CD_FER"); //__DATE__ is provided by the platformio ide
     dualOutput(false, "%s-%d\n\r", ESP.getChipModel(), ESP.getChipRevision());
 
-    // Serial.print("Starting accesspoint");
-    // M5Cardputer.Display.print("Starting accesspoint");
+    dualOutput(true, "starting accesspoint");
     startSoftAccessPoint(ssid, password, localIP, gatewayIP);
 
-    // Serial.print("Setting up DNS server...");
-    // M5Cardputer.Display.print("Setting up DNS server...");
+    dualOutput(true, "setting up DNS server...");
     setUpDNSServer(dnsServer, localIP);
 
+    dualOutput(true, "scanNetworks setting true...");
     WiFi.scanNetworks(true);
 
+    dualOutput(true, "setting up web server...");
     setUpWebserver(server, localIP);
+    dualOutput(true, "starting web server...");
     server.begin();
 
     dualNewLine();
@@ -846,6 +849,7 @@ void loop()
         {
             dualOutput(true, "Setting up websocket to 01OS " + server_domain + ":" + server_port);
             websocket_setup(server_domain, server_port);
+            dualOutput(true, "setting MODE_SPK...");
             InitI2SSpeakerOrMic(MODE_SPK);
 
             hasSetupWebsocket = true;
